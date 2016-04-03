@@ -1,0 +1,81 @@
+---
+title: "Automatic vs manual transmission"
+author: "Dr Mark Thomas"
+date: "1 April 2016"
+output: html_document
+---
+```{r}
+library(ggplot2)
+library(GGally)
+library(reshape2)
+library(caret)
+data(mtcars)
+mtcars$am <- factor(mtcars$am, labels=c("Automatic","Manual"))
+mtcars$name <- rownames(mtcars)
+
+fig1 <- ggplot(mtcars, aes(am, mpg))+labs(x="", y="Miles per gallon")
+g1 <- geom_point(size=1.5,alpha=0.5,position=position_jitter(width=0.4,height=0))
+g2 <- stat_summary(fun.y = mean,geom="point",color="black",size=3)
+g3 <- stat_summary(fun.data=mean_sdl,fun.args = list(mult = 1), geom="errorbar", 
+                   color="black", size=0.8, width=0.3, alpha=0.8)
+g4 <- theme_bw()
+fig1 <- fig1 + g1 + g2 + g3 + g4
+fig1
+
+unadjFit <- lm(mpg~am, data=mtcars)
+summary(unadjFit)
+```
+The unadjusted coefficient for manual gearbox vs automatic gearbox is 7.245 (p<0.001). This implies that cars with manual gearboxes allow 7.25 miles per gallon more than automatic gearboxes.
+
+However, this is observational data and there are potential confounders that need to be taken into account. Next, the relationship between mpg and other variables in the dataset is investigated.
+```{r, fig.width=10}
+meltmtcars <- melt(mtcars, id.vars=c("name", "mpg","am"))
+ggplot(meltmtcars, aes(value, mpg, color=am)) + geom_point() + geom_smooth(method="lm",aes(fill=am)) + facet_grid(.~variable,scales = "free")+labs(x="", y="Miles per gallon") + g4
+```
+
+There is clearly a strong linear relationship between mpg and cyl,disp,hp,drat,wt,qsec,vs,gear and carb. It is therefore possible that the relationship between am and mpg may not be independent of all of these other factors. Plotting all variables against mpg and splitting them by am shows that there are no clear interactions between the other variables and am.
+
+Many of the other variables are also highly correlated, some with pearson R values of over 0.8 which suggests very strong correlation:
+```{r}
+cor(mtcars[,!names(mtcars)%in%c("name","am")])
+```
+Another linear model is fitted to determine the relationship between mpg and am. This time all of the variables are used in a multivariate linear model. However, due to the low sample size and high number of variables, this model is likely to overfit the data. Additionally, the highly correlated nature of the variables will reduce the significance (increase the standard error) of each individual variable.
+```{r}
+multFit <- lm(mpg~am+cyl+disp+hp+drat+wt+qsec+vs+gear+carb, data=mtcars)
+summary(multFit)
+```
+There has been a reduction in the coefficient associated with manual gearboxes compared to automatic gearboxes. This is now only 2.52, which suggests that confounding contributed to the higher value previously recorded. This coefficient is also no longer statistically significant (p=0.234).
+
+This model is not optimal however due to the highly correlated variables and relatively large number of variables compared to the sample size.
+
+The caret package was therefore utilised to identify the optimal variables to include in the model, using cross validation.
+```{r}
+ctrl <- rfeControl(functions=lmFuncs, method="repeatedcv", repeats=5, number=5, verbose=FALSE)
+lmProfile <- rfe(x=mtcars[,!names(mtcars)%in%c("mpg","name","am")], y=mtcars$mpg, rfeControl=ctrl)
+optimalVar <- lmProfile$optVariables
+optimalVar
+```
+The optimal variables were then included in a new model, along with am.
+```{r}
+optimalFit <- lm(mpg~am+wt+gear+drat+qsec, data=mtcars)
+summary(optimalFit)
+```
+We can see that wt appears to have the strongest significant association with mpg. In the model, am again did not have a significant association with mpg (p=0.14).
+
+Next diagnostic plots are produced, which shows evidence of heteroskedasticity.
+```{r}
+plot(optimalFit)
+```
+
+
+##Answers to questions:
+Is automatic or manual transmission better for MPG?
+Unadjusted analyses showed that manual transmission is associated with a higher MPG than automatic transmission. However, following adjustment for confounders (wt, gear, drat and qsec), this association was no longer statistically significant. This suggests that the relationship is not independent and therefore may not be causal. The relationship appeared to be confounded by the fact that manual cars tend to be lighter and more gears than automatic gearboxes.
+
+Quantify the MPG difference between automatic and manual transmissions
+Unadjusted analyses showed that manual gearboxes are associated with 7.25 (p<0.001) more MPG than automatic gearboxes. However, after adjusting for confounding variables (wt, gear, drat, qsec), manual gearboxes were then only associated with 2.5 more MPG, which was not statistically significant (p=0.14).
+
+#Executive summary
+Crude associations show that manual gearboxes are associated with higher MPG than automatic gearboxes. However, after adjusting for confounders (such as weight), this relationship was no longer statistically significant. Therefore, this data does not support an independent causal relationship between manual gearboxes and an increase in MPG.
+
+
